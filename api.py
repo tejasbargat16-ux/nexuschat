@@ -280,7 +280,16 @@ def chat():
     try:
         reply = generate_reply_with_search(conversation_id, provider, model, request.host_url.rstrip("/"))
     except Exception as e:
-        return jsonify({"error": str(e)}), 502
+        groq_key = providers.load_key("groq", SCRIPT_DIR)
+        if provider != "groq" and groq_key:
+            try:
+                fallback_model = providers.PROVIDERS["groq"]["default_model"]
+                reply = generate_reply_with_search(conversation_id, "groq", fallback_model, request.host_url.rstrip("/"))
+                reply = f"> ⚠️ **Note:** `{provider}` failed (`{str(e)[:100]}`). Falling back to Groq (`{fallback_model}`).\n\n" + reply
+            except Exception as e2:
+                return jsonify({"error": f"{provider} failed ({e}), and fallback also failed ({e2})"}), 502
+        else:
+            return jsonify({"error": str(e)}), 502
 
     command = agent.extract_command(reply)
     if command and not agent.is_blocked(command):

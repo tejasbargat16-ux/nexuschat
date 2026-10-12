@@ -25,10 +25,32 @@ import datetime
 import threading
 import webbrowser
 import subprocess
-import wikipedia
-import pyttsx3
-import sounddevice as sd
-import speech_recognition as sr
+import shutil
+
+try:
+    import wikipedia
+    HAS_WIKIPEDIA = True
+except ImportError:
+    HAS_WIKIPEDIA = False
+
+try:
+    import pyttsx3
+    HAS_PYTTSX3 = True
+except ImportError:
+    HAS_PYTTSX3 = False
+
+try:
+    import sounddevice as sd
+    HAS_SOUNDDEVICE = True
+except ImportError:
+    HAS_SOUNDDEVICE = False
+
+try:
+    import speech_recognition as sr
+    HAS_SR = True
+except ImportError:
+    HAS_SR = False
+
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -103,57 +125,63 @@ def speak(text):
     t.join(timeout=15)
 
 # ------------------------------------------------------------------ Mic Adapter
-class SoundDeviceMicrophone(sr.AudioSource):
-    """
-    Pure-Python microphone source for SpeechRecognition via sounddevice.
-    Bypasses PyAudio and requires no C++ compiler tools.
-    """
-    def __init__(self, device=None, sample_rate=16000, chunk_size=1024):
-        self.device = device
-        self.SAMPLE_RATE = sample_rate
-        self.CHUNK = chunk_size
-        self.SAMPLE_WIDTH = 2  # 16-bit PCM (2 bytes)
-        self.stream = None
-
-    def __enter__(self):
-        self.raw_stream = sd.RawInputStream(
-            samplerate=self.SAMPLE_RATE,
-            blocksize=self.CHUNK,
-            dtype="int16",
-            channels=1,
-            device=self.device
-        )
-        self.raw_stream.start()
-        self.stream = self.StreamWrapper(self.raw_stream)
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.stream:
-            self.stream.close()
+if HAS_SOUNDDEVICE and HAS_SR:
+    class SoundDeviceMicrophone(sr.AudioSource):
+        """
+        Pure-Python microphone source for SpeechRecognition via sounddevice.
+        Bypasses PyAudio and requires no C++ compiler tools.
+        """
+        def __init__(self, device=None, sample_rate=16000, chunk_size=1024):
+            self.device = device
+            self.SAMPLE_RATE = sample_rate
+            self.CHUNK = chunk_size
+            self.SAMPLE_WIDTH = 2  # 16-bit PCM (2 bytes)
             self.stream = None
 
-    class StreamWrapper:
-        def __init__(self, raw_stream):
-            self.raw_stream = raw_stream
+        def __enter__(self):
+            self.raw_stream = sd.RawInputStream(
+                samplerate=self.SAMPLE_RATE,
+                blocksize=self.CHUNK,
+                dtype="int16",
+                channels=1,
+                device=self.device
+            )
+            self.raw_stream.start()
+            self.stream = self.StreamWrapper(self.raw_stream)
+            return self
 
-        def read(self, size):
-            data, _ = self.raw_stream.read(size)
-            return bytes(data)
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            if self.stream:
+                self.stream.close()
+                self.stream = None
 
-        def close(self):
-            try:
-                self.raw_stream.stop()
-            finally:
-                self.raw_stream.close()
+        class StreamWrapper:
+            def __init__(self, raw_stream):
+                self.raw_stream = raw_stream
+
+            def read(self, size):
+                data, _ = self.raw_stream.read(size)
+                return bytes(data)
+
+            def close(self):
+                try:
+                    self.raw_stream.stop()
+                finally:
+                    self.raw_stream.close()
+else:
+    class SoundDeviceMicrophone:
+        pass
 
 # Check microphone availability
-VOICE_MODE_AVAILABLE = True
-try:
-    _ = sd.query_devices()
-except Exception:
-    VOICE_MODE_AVAILABLE = False
+VOICE_MODE_AVAILABLE = False
+if HAS_SOUNDDEVICE:
+    try:
+        _ = sd.query_devices()
+        VOICE_MODE_AVAILABLE = True
+    except Exception:
+        VOICE_MODE_AVAILABLE = False
 
-recognizer = sr.Recognizer()
+recognizer = sr.Recognizer() if HAS_SR else None
 active_mode = "voice" if VOICE_MODE_AVAILABLE else "text"
 
 def take_command():
@@ -285,6 +313,8 @@ def search_wikipedia(search_term, sentences=2):
     search_term = search_term.strip()
     if not search_term:
         return False, "Please specify what you would like to look up on Wikipedia."
+    if not HAS_WIKIPEDIA:
+        return False, "Wikipedia module is not installed (pip install wikipedia)."
     try:
         results = wikipedia.summary(search_term, sentences=sentences)
         return True, results

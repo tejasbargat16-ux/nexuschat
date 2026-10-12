@@ -1184,8 +1184,8 @@
     let API_KEY = localStorage.getItem("nexus_api_key") || DEFAULT_KEY;
 
     let currentConversationId = null;
-    let currentProvider = "gemini";
-    let currentModel = "gemini-3.8-flash";
+    let currentProvider = "groq";
+    let currentModel = "openai/gpt-oss-120b";
     let providersData = [];
     let voiceOutputEnabled = false;
 
@@ -1235,8 +1235,8 @@
           providerSelect.appendChild(opt);
         });
 
-        // Pick gemini or first configured provider
-        const preferred = providersData.find(p => p.id === "gemini" && p.key_configured) ||
+        // Pick groq or first configured provider
+        const preferred = providersData.find(p => p.id === "groq" && p.key_configured) ||
                           providersData.find(p => p.key_configured) ||
                           providersData[0];
         if (preferred) {
