@@ -130,3 +130,15 @@ def run_command(command, cwd=None, timeout=30):
         return "", f"Command timed out after {timeout}s", -1
     except Exception as e:
         return "", str(e), -1
+
+
+def execute_command(command, cwd=None, timeout=30):
+    """
+    Run an approved command, returning (returncode, stdout, stderr).
+
+    Alias kept for Nexus_task.py, which unpacks in that order. Callers must
+    have obtained explicit user approval first — like run_command, this does
+    no prompting of its own.
+    """
+    stdout, stderr, code = run_command(command, cwd=cwd, timeout=timeout)
+    return code, stdout, stderr

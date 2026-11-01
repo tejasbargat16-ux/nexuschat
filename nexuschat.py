@@ -41,6 +41,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
+from rich.table import Table
 
 import db
 import providers
@@ -58,7 +59,8 @@ console = Console()
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 SYSTEM_PROMPT = identity.CORE_SYSTEM_PROMPT
 
-DEFAULT_PROVIDER = "groq"
+# Loaded from models.json (falling back to providers.py defaults).
+DEFAULT_PROVIDER = providers.DEFAULT_PROVIDER
 MAX_AGENT_STEPS = 5
 
 
@@ -99,16 +101,50 @@ def show_models(provider):
     console.print("[dim]You can also use any other model name the provider supports.[/]")
 
 
+def show_health():
+    """Probe every configured provider with a tiny live request."""
+    configured = providers.available_providers(SCRIPT_DIR)
+    if not configured:
+        console.print("[yellow]No provider has an API key configured.[/]")
+        return
+
+    table = Table(title="Provider health", border_style="cyan")
+    table.add_column("Provider", style="bold")
+    table.add_column("Model", overflow="fold")
+    table.add_column("Status")
+    table.add_column("Latency", justify="right")
+
+    for pid in configured:
+        with console.status(f"[cyan]Checking {providers.PROVIDERS[pid]['label']}...[/]"):
+            result = providers.check_provider_health(pid, SCRIPT_DIR)
+        if result["status"] == "healthy":
+            status = "[green]online[/]"
+            latency = f"{result['latency_ms']} ms"
+        elif result["status"] == "unconfigured":
+            status = "[yellow]unconfigured[/]"
+            latency = "-"
+        else:
+            status = f"[red]{result['message'][:60]}[/]"
+            latency = "-"
+        table.add_row(result["label"], result["default_model"] or "—", status, latency)
+
+    console.print(table)
+
+
 def pick_starting_provider():
-    """Use the first provider that has a key available; fall back to groq."""
-    for name in [DEFAULT_PROVIDER] + [p for p in providers.PROVIDERS if p != DEFAULT_PROVIDER]:
+    """Prefer the configured default provider; otherwise the first one with a key."""
+    default = providers.DEFAULT_PROVIDER
+    for name in [default] + [p for p in providers.PROVIDERS if p != default]:
         if providers.load_key(name, SCRIPT_DIR):
             return name
-    return DEFAULT_PROVIDER
+    return default
 
 
 def main():
     db.init_db()
+
+    for warning in providers.load_models_config(SCRIPT_DIR):
+        console.print(f"[yellow]Config:[/] {warning}")
 
     provider = pick_starting_provider()
     api_key = providers.load_key(provider, SCRIPT_DIR)
@@ -219,6 +255,8 @@ def main():
                     console.print(f"[cyan]Current model: {model}[/]")
             elif cmd == "/models":
                 show_models(provider)
+            elif cmd == "/health":
+                show_health()
             elif cmd == "/remember":
                 if arg:
                     user_profile.add_fact(arg)
@@ -358,7 +396,18 @@ def main():
 
                 if local_llm.is_online():
                     with console.status(f"[cyan]NEXUS ({providers.PROVIDERS[provider]['label']}) is thinking...[/]"):
-                        reply = providers.call(provider, api_key, model, call_messages)
+                        reply, used_provider, used_model, attempts = providers.call_with_fallback(
+                            provider, model, call_messages, script_dir=SCRIPT_DIR
+                        )
+                        if used_provider != provider:
+                            reason = attempts[0]["error"][:120] if attempts else "unavailable"
+                            console.print(
+                                f"[yellow]{provider} failed ({reason}). "
+                                f"Answered with {providers.PROVIDERS[used_provider]['label']} "
+                                f"({used_model}) instead.[/]"
+                            )
+                        provider, model = used_provider, used_model
+                        api_key = providers.load_key(provider, SCRIPT_DIR)
                 elif local_llm.is_configured():
                     console.print("[yellow]No internet detected — answering from the local offline model (weaker than the cloud models).[/]")
                     with console.status("[cyan]Thinking locally (offline)...[/]"):

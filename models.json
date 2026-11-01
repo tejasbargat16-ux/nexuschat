@@ -1,0 +1,62 @@
+{
+  "_comment": "Override any provider setting here instead of editing Python. Every key is optional; anything omitted falls back to the built-in defaults in providers.py. Invalid values are reported at startup and ignored.",
+  "default_provider": "groq",
+  "fallback_order": [
+    "groq",
+    "gemini",
+    "openrouter",
+    "openai",
+    "mistral",
+    "cohere"
+  ],
+  "request_timeout": 60,
+  "providers": {
+    "groq": {
+      "default_model": "openai/gpt-oss-120b",
+      "suggested_models": [
+        "openai/gpt-oss-120b",
+        "openai/gpt-oss-20b"
+      ]
+    },
+    "gemini": {
+      "default_model": "gemini-3.8-flash",
+      "suggested_models": [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-2.5-pro"
+      ]
+    },
+    "openrouter": {
+      "default_model": "qwen/qwen3.8-27b:free",
+      "suggested_models": [
+        "qwen/qwen3.8-27b:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "meta-llama/llama-3.3-70b-instruct"
+      ]
+    },
+    "openai": {
+      "default_model": "gpt-5.4",
+      "suggested_models": [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-4.1"
+      ]
+    },
+    "mistral": {
+      "default_model": "mistral-small-latest",
+      "suggested_models": [
+        "mistral-small-latest",
+        "mistral-large-latest",
+        "open-mistral-nemo"
+      ]
+    },
+    "cohere": {
+      "default_model": "command-r-08-2024",
+      "suggested_models": [
+        "command-r-08-2024",
+        "command-r-plus-08-2024",
+        "command-a-03-2025"
+      ]
+    }
+  }
+}

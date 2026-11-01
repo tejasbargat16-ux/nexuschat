@@ -227,13 +227,12 @@ def take_command():
 
 # ------------------------------------------------------------------ AI Provider Setup
 def get_ai_provider():
-    """Detect first available configured provider."""
-    for p in ["groq", "gemini", "openrouter", "openai", "mistral", "cohere"]:
-        key = providers.load_key(p, SCRIPT_DIR)
-        if key:
-            model = providers.PROVIDERS[p]["default_model"]
-            return p, model, key
-    return None, None, None
+    """Detect first available configured provider, in configured fallback order."""
+    available = providers.available_providers(SCRIPT_DIR)
+    if not available:
+        return None, None, None
+    p = available[0]
+    return p, providers.PROVIDERS[p]["default_model"], providers.load_key(p, SCRIPT_DIR)
 
 def ask_nexus_ai(query, conversation_id, history):
     """
@@ -248,8 +247,11 @@ def ask_nexus_ai(query, conversation_id, history):
     db.add_message(conversation_id, "user", query)
 
     try:
-        reply = providers.chat(provider, model, history, key)
-    except Exception as e:
+        # Shared router: falls back to another configured provider on failure.
+        reply, provider, model, _attempts = providers.call_with_fallback(
+            provider, model, history, script_dir=SCRIPT_DIR
+        )
+    except RuntimeError as e:
         return f"AI connection error: {e}"
 
     # Handle agent search proposal if present
@@ -265,8 +267,10 @@ def ask_nexus_ai(query, conversation_id, history):
         history.append({"role": "user", "content": feedback})
         db.add_message(conversation_id, "user", feedback)
         try:
-            reply = providers.chat(provider, model, history, key)
-        except Exception:
+            reply, provider, model, _attempts = providers.call_with_fallback(
+                provider, model, history, script_dir=SCRIPT_DIR
+            )
+        except RuntimeError:
             pass
 
     # Handle agent system command proposal if present
@@ -282,8 +286,10 @@ def ask_nexus_ai(query, conversation_id, history):
             history.append({"role": "user", "content": f"Command output:\n{result}"})
             db.add_message(conversation_id, "user", result)
             try:
-                reply = providers.chat(provider, model, history, key)
-            except Exception:
+                reply, provider, model, _attempts = providers.call_with_fallback(
+                    provider, model, history, script_dir=SCRIPT_DIR
+                )
+            except RuntimeError:
                 pass
         else:
             speak("Command cancelled.")

@@ -65,6 +65,10 @@ SYSTEM_PROMPT = identity.CORE_SYSTEM_PROMPT
 
 STATIC_DIR = os.path.join(SCRIPT_DIR, "static")
 
+# models.json overrides the built-in provider defaults (non-fatal if absent).
+for _warning in providers.load_models_config(SCRIPT_DIR):
+    print(f"[config] {_warning}")
+
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
 CORS(app, resources={r"/*": {"origins": "*"}})
 
@@ -91,7 +95,7 @@ def require_api_key():
 def check_auth():
     if request.method == "OPTIONS":
         return  # let flask-cors handle preflight
-    if request.path in ("/", "/health", "/favicon.ico") or request.path.startswith("/static"):
+    if request.path in ("/", "/favicon.ico") or request.path.startswith("/health") or request.path.startswith("/static"):
         return
     err = require_api_key()
     if err:
@@ -107,6 +111,11 @@ def index():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.route("/health/providers", methods=["GET"])
+def health_providers():
+    return jsonify(providers.check_all_providers_health(SCRIPT_DIR))
 
 
 @app.route("/images/<path:filename>", methods=["GET"])
@@ -133,6 +142,25 @@ def list_providers():
             "key_configured": bool(providers.load_key(pid, SCRIPT_DIR)),
         })
     return jsonify(out)
+
+
+@app.route("/providers/health", methods=["GET"])
+def providers_health():
+    """
+    Live-probe every provider that has a key configured.
+
+    Each probe is a real (tiny) API call, so this endpoint costs quota and
+    takes a few seconds per provider — it is meant for diagnostics and
+    manual checks, not for polling on every page load.
+    """
+    results = [providers.check_provider_health(pid, SCRIPT_DIR) for pid in providers.available_providers(SCRIPT_DIR)]
+    healthy = [r for r in results if r["status"] == "healthy"]
+    return jsonify({
+        "ok": bool(healthy),
+        "default_provider": providers.DEFAULT_PROVIDER,
+        "healthy_count": len(healthy),
+        "results": results,
+    })
 
 
 # -------------------------------------------------------------- conversations
@@ -207,12 +235,16 @@ def build_system_message():
 
 
 def generate_reply(conversation_id, provider, model):
-    """Rebuild full context from DB and call the provider. Returns the raw reply text."""
-    api_key = providers.load_key(provider, SCRIPT_DIR)
-    if not api_key:
-        raise RuntimeError(f"No API key configured on the server for provider '{provider}'.")
+    """
+    Rebuild full context from DB and call the provider. Returns
+    (reply_text, provider_used, model_used). Falls back to another configured
+    provider if the requested one fails.
+    """
     history = [build_system_message()] + db.get_messages(conversation_id)
-    return providers.call(provider, api_key, model, history)
+    reply, used_provider, used_model, attempts = providers.call_with_fallback(
+        provider, model, history, script_dir=SCRIPT_DIR
+    )
+    return reply, used_provider, used_model
 
 
 MAX_SEARCH_STEPS = 5
@@ -225,10 +257,13 @@ def generate_reply_with_search(conversation_id, provider, model, image_base_url=
     before returning the final reply. Intermediate request/result messages
     are saved to the DB; the final reply is NOT saved here (the caller does
     that, same as the plain generate_reply contract).
+
+    Returns (reply_text, provider_used, model_used) — the provider may differ
+    from the one requested if fallback kicked in.
     """
     steps = 0
     while True:
-        reply = generate_reply(conversation_id, provider, model)
+        reply, provider, model = generate_reply(conversation_id, provider, model)
 
         query = agent.extract_search(reply)
         if query and steps < MAX_SEARCH_STEPS:
@@ -258,7 +293,7 @@ def generate_reply_with_search(conversation_id, provider, model, image_base_url=
             db.add_message(conversation_id, "user", feedback)
             continue
 
-        return reply
+        return reply, provider, model
 
 
 @app.route("/chat", methods=["POST"])
@@ -274,22 +309,28 @@ def chat():
     if provider not in providers.PROVIDERS:
         return jsonify({"error": f"Unknown provider '{provider}'"}), 400
 
+    requested_provider, requested_model = provider, model
     _last_used[conversation_id] = (provider, model)
     db.add_message(conversation_id, "user", message)
 
     try:
-        reply = generate_reply_with_search(conversation_id, provider, model, request.host_url.rstrip("/"))
+        reply, provider, model = generate_reply_with_search(
+            conversation_id, provider, model, request.host_url.rstrip("/")
+        )
+    except RuntimeError as e:
+        # call_with_fallback raises RuntimeError listing every provider tried.
+        return jsonify({"error": str(e)}), 502
     except Exception as e:
-        groq_key = providers.load_key("groq", SCRIPT_DIR)
-        if provider != "groq" and groq_key:
-            try:
-                fallback_model = providers.PROVIDERS["groq"]["default_model"]
-                reply = generate_reply_with_search(conversation_id, "groq", fallback_model, request.host_url.rstrip("/"))
-                reply = f"> ⚠️ **Note:** `{provider}` failed (`{str(e)[:100]}`). Falling back to Groq (`{fallback_model}`).\n\n" + reply
-            except Exception as e2:
-                return jsonify({"error": f"{provider} failed ({e}), and fallback also failed ({e2})"}), 502
-        else:
-            return jsonify({"error": str(e)}), 502
+        return jsonify({"error": str(e)}), 502
+
+    # Fallback may have switched provider/model; remember what actually answered
+    # so /agent/run continues the conversation on the working provider.
+    _last_used[conversation_id] = (provider, model)
+    if (provider, model) != (requested_provider, requested_model):
+        reply = (
+            f"> ⚠️ **Note:** `{requested_provider}` (`{requested_model}`) was unavailable. "
+            f"Answered with `{provider}` (`{model}`) instead.\n\n" + reply
+        )
 
     command = agent.extract_command(reply)
     if command and not agent.is_blocked(command):

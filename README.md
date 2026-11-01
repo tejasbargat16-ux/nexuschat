@@ -58,6 +58,7 @@ python nexuschat.py
 | `/provider <name>` | Switch provider (`groq`, `gemini`, `openrouter`, `openai`, `mistral`, `cohere`) |
 | `/model <name>` | Switch model within the current provider |
 | `/models` | List suggested models for the current provider |
+| `/health` | Live-probe every configured provider (key, endpoint, model, latency) |
 | `/remember <fact>` | Save a fact about you for NEXUS to remember always |
 | `/profile` | Show everything NEXUS remembers about you |
 | `/forget all` | Erase all saved memory |
@@ -168,7 +169,8 @@ Building on an Android phone shaped the architecture:
 
 - **Flask instead of FastAPI**: FastAPI dependencies pull in Rust-compiled packages (such as `pydantic-core`), which are painful and slow to build on Termux. Flask installs cleanly with zero native compilation overhead.
 - **Plain `requests` instead of heavy SDKs**: Fewer dependencies, faster startup times, and one consistent method to call every provider.
-- **Provider Abstraction Layer**: Model slugs get deprecated frequently; centralizing model configurations in `providers.py` makes updates instantaneous.
+- **Provider Abstraction Layer**: Model slugs get deprecated frequently; the defaults live in `providers.py` but can be overridden without touching Python via `models.json`.
+- **Graceful Config Failure**: `models.json` is merged over the built-in defaults. A missing, malformed, or half-wrong file prints a warning and keeps the defaults — a bad config never stops NEXUS from starting.
 - **Resilient Fallback Design**: If a provider is down or rate-limited, NEXUS automatically falls back to secondary cloud providers or a local offline GGUF model.
 
 ---
@@ -214,6 +216,38 @@ pip install -r requirements.txt
 python nexuschat.py
 ```
 
+### 🎛️ Tuning Models & Fallback (`models.json`)
+
+Model slugs, the default provider, the fallback order, and the request timeout
+all live in `models.json`. Edit that file instead of editing Python:
+
+```json
+{
+  "default_provider": "groq",
+  "fallback_order": ["groq", "gemini", "openrouter"],
+  "request_timeout": 60,
+  "providers": {
+    "groq": { "default_model": "openai/gpt-oss-120b" }
+  }
+}
+```
+
+Every key is optional — anything you omit keeps its built-in default. Invalid
+entries are reported at startup and ignored, so a typo can't lock you out.
+
+Check provider health at any time:
+
+```bash
+# In the terminal chat
+/health
+
+# Or against the running API
+curl -H "X-API-Key: $NEXUS_API_KEY" http://127.0.0.1:8000/providers/health
+```
+
+Both make one tiny live request per configured provider, so they confirm the
+key, endpoint, and model slug all work together — unlike a plain ping.
+
 ### 🌐 Starting the REST API Server
 
 ```bash
@@ -230,6 +264,9 @@ python api.py
 - [x] Voice I/O (Whisper STT + TTS)
 - [x] DuckDuckGo web search integration and image synthesis
 - [x] Flask REST API for external frontends
+- [x] Config-based models (`models.json`) instead of hardcoded slugs
+- [x] Provider health checks (`/health`, `GET /providers/health`)
+- [x] Automatic fallback shared by CLI, API and task runner
 - [ ] RAG over user documents
 - [ ] Multi-step agent workflows (tool planning)
 - [ ] Polished web HUD frontend
