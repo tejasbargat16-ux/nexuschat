@@ -276,23 +276,30 @@ def ask_nexus_ai(query, conversation_id, history):
     # Handle agent system command proposal if present
     cmd = agent.extract_command(reply)
     if cmd:
-        console.print(Panel(f"[bold red]Proposed Command:[/] {cmd}", title="Agent Action", border_style="yellow"))
-        speak(f"I propose running the command: {cmd}. Do you want to run it?")
-        confirmation = take_command().lower()
-        if "yes" in confirmation or "sure" in confirmation or "run" in confirmation:
-            code, stdout, stderr = agent.execute_command(cmd)
-            result = f"Command exited with {code}.\nOutput: {stdout}\nErrors: {stderr}"
-            console.print(Panel(result, title="Execution Result"))
-            history.append({"role": "user", "content": f"Command output:\n{result}"})
-            db.add_message(conversation_id, "user", result)
-            try:
-                reply, provider, model, _attempts = providers.call_with_fallback(
-                    provider, model, history, script_dir=SCRIPT_DIR
-                )
-            except RuntimeError:
-                pass
+        if agent.is_blocked(cmd):
+            console.print(f"[bold red]Refusing to run (blocked as dangerous):[/] {cmd}")
+            speak("That command was blocked for safety and cannot be executed.")
+            feedback = "That command was blocked for safety and was not run. Suggest a safer alternative or ask the user for clarification."
+            history.append({"role": "user", "content": feedback})
+            db.add_message(conversation_id, "user", feedback)
         else:
-            speak("Command cancelled.")
+            console.print(Panel(f"[bold red]Proposed Command:[/] {cmd}", title="Agent Action", border_style="yellow"))
+            speak(f"I propose running the command: {cmd}. Do you want to run it?")
+            confirmation = take_command().lower()
+            if "yes" in confirmation or "sure" in confirmation or "run" in confirmation:
+                code, stdout, stderr = agent.execute_command(cmd)
+                result = f"Command exited with {code}.\nOutput: {stdout}\nErrors: {stderr}"
+                console.print(Panel(result, title="Execution Result"))
+                history.append({"role": "user", "content": f"Command output:\n{result}"})
+                db.add_message(conversation_id, "user", result)
+                try:
+                    reply, provider, model, _attempts = providers.call_with_fallback(
+                        provider, model, history, script_dir=SCRIPT_DIR
+                    )
+                except RuntimeError:
+                    pass
+            else:
+                speak("Command cancelled.")
 
     history.append({"role": "assistant", "content": reply})
     db.add_message(conversation_id, "assistant", reply)
@@ -464,7 +471,7 @@ def main():
             try:
                 img_path = imagegen.generate_image_pollinations(prompt)
                 speak(f"Image generated and saved.")
-                imagegen.open_image_viewer(img_path)
+                imagegen.open_image(img_path)
             except Exception as e:
                 speak(f"Image generation failed: {e}")
             continue

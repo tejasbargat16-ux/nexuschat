@@ -21,6 +21,7 @@ import base64
 import os
 import shutil
 import subprocess
+import sys
 import time
 import urllib.parse
 
@@ -99,8 +100,25 @@ def generate_image(prompt, script_dir=None, prefer_gemini=False):
 
 
 def open_image(path):
-    """Open the image in the device's default viewer, if termux-open is available."""
+    """Open the image in the device's default viewer across Termux and Desktop."""
     if shutil.which("termux-open"):
         subprocess.run(["termux-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
+    elif sys.platform == "win32":
+        try:
+            os.startfile(path)
+            return True
+        except Exception:
+            return False
+    elif sys.platform == "darwin" and shutil.which("open"):
+        subprocess.run(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    elif shutil.which("xdg-open"):
+        subprocess.run(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
     return False
+
+
+def open_image_viewer(path):
+    """Alias for open_image."""
+    return open_image(path)

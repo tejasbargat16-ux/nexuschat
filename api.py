@@ -69,6 +69,8 @@ STATIC_DIR = os.path.join(SCRIPT_DIR, "static")
 for _warning in providers.load_models_config(SCRIPT_DIR):
     print(f"[config] {_warning}")
 
+db.init_db()
+
 app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="/static")
 CORS(app, resources={r"/*": {"origins": "*"}})
 
@@ -379,7 +381,8 @@ def agent_run():
     db.add_message(conversation_id, "user", f"Command output:\n{summary}")
 
     try:
-        follow_up = generate_reply_with_search(conversation_id, provider, model, request.host_url.rstrip("/"))
+        follow_up, new_p, new_m = generate_reply_with_search(conversation_id, provider, model, request.host_url.rstrip("/"))
+        _last_used[conversation_id] = (new_p, new_m)
     except Exception as e:
         follow_up = f"(Command ran, but generating a follow-up reply failed: {e})"
 
@@ -410,7 +413,8 @@ def agent_decline():
         "instead, or propose a different approach.",
     )
     try:
-        follow_up = generate_reply_with_search(conversation_id, provider, model, request.host_url.rstrip("/"))
+        follow_up, new_p, new_m = generate_reply_with_search(conversation_id, provider, model, request.host_url.rstrip("/"))
+        _last_used[conversation_id] = (new_p, new_m)
     except Exception as e:
         follow_up = f"(Failed to generate a follow-up: {e})"
 

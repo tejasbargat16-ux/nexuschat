@@ -400,7 +400,7 @@ def main():
                             provider, model, call_messages, script_dir=SCRIPT_DIR
                         )
                         if used_provider != provider:
-                            reason = attempts[0]["error"][:120] if attempts else "unavailable"
+                            reason = attempts[0][1][:120] if attempts else "unavailable"
                             console.print(
                                 f"[yellow]{provider} failed ({reason}). "
                                 f"Answered with {providers.PROVIDERS[used_provider]['label']} "

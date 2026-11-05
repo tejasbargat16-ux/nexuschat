@@ -440,7 +440,7 @@ def call_with_fallback(*args, **kwargs):
     else:
         # Convention 2: (preferred_provider, preferred_model, messages, script_dir=...)
         preferred_provider = args[0] if len(args) > 0 else (kwargs.get("preferred") or DEFAULT_PROVIDER)
-        preferred_model = args[1] if len(args) > 1 else (kwargs.get("model") or PROVIDERS.get(preferred_provider, {}).get("default_model"))
+        preferred_model = (args[1] if len(args) > 1 and args[1] else None) or kwargs.get("model") or PROVIDERS.get(preferred_provider, {}).get("default_model")
         messages = args[2] if len(args) > 2 else kwargs.get("messages", [])
         script_dir = args[3] if len(args) > 3 else kwargs.get("script_dir")
         fallback_chain = kwargs.get("fallback_chain")
